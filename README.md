@@ -2,7 +2,7 @@
 
 8-bit side-scrolling fan game starring a pixel roadster. Grab the lightning from the ? block to charge up, double-jump for a barrel roll, and reach the charge station.
 
-Play: https://mario.tesduo.com
+Play: https://roadster.tesduo.com
 
 - Arrows / A·D move, Z / Space jump (press again in the air for a barrel roll), X run, M mute
 - `?autoplay=1` runs the demo bot
