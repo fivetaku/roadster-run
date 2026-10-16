@@ -1,4 +1,4 @@
-// ROADSTER RUN — original 8-bit fan game. All art and sound are drawn/synthesized here.
+// VOLT ROADSTER — original 8-bit fan game. All art and sound are drawn/synthesized here.
 'use strict';
 
 const W = 400, H = 224, TS = 16, COLS = 220, ROWS = 14;
@@ -808,8 +808,8 @@ function render() {
 
   if (G.state === 'title') {
     ctx.fillStyle = 'rgba(11,11,16,0.55)'; ctx.fillRect(0, 40, W, 128);
-    ctext('ROADSTER RUN', 56, '#ffffff', 3);
-    ctext('AN 8-BIT FAN GAME', 86, '#9ff8ff');
+    ctext('VOLT ROADSTER', 56, '#ffffff', 3);
+    ctext('CHARGE UP. ROLL. REACH THE STATION.', 86, '#9ff8ff');
     ctx.drawImage(CAR[(G.frame >> 3) % 2], 184, 104);
     if ((G.frame >> 5) % 2) ctext('PRESS ENTER OR TAP', 132, '#ffd31a');
     ctext('ARROWS MOVE  Z JUMP  ZZ ROLL  X RUN', 152, '#ffffff');
@@ -869,4 +869,10 @@ window.RR = {
   G, get P() { return P; }, get enemies() { return enemies; },
   stepN(n) { for (let i = 0; i < n; i++) update(); render(); return { state: G.state, x: P.x, score: G.score, deaths: G.deaths, lives: G.lives }; },
   renderFullMap,
+  icon(size) {
+    const c = mk(size, size), x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+    x.fillStyle = '#2a86ff'; x.fillRect(0, 0, size, size);
+    const k = size / 16; x.drawImage(BOLT, k * 0.5, k, BOLT.width * k * 0.95, BOLT.height * k * 0.95);
+    return c.toDataURL('image/png');
+  },
 };
