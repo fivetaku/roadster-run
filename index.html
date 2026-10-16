@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ROADSTER RUN — 8-bit fan game</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0b10;overflow:hidden;touch-action:none}
+  body{display:flex;align-items:center;justify-content:center}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+  #touch{position:fixed;left:0;right:0;bottom:12px;display:none;justify-content:space-between;padding:0 16px;pointer-events:none}
+  #touch div{display:flex;gap:12px}
+  #touch button{pointer-events:auto;width:64px;height:64px;border-radius:50%;border:2px solid #fff6;background:#0006;color:#fff;font:bold 16px monospace;user-select:none;-webkit-user-select:none}
+</style>
+</head>
+<body>
+<canvas id="c" width="400" height="224"></canvas>
+<div id="touch">
+  <div><button data-k="left">◀</button><button data-k="right">▶</button></div>
+  <div><button data-k="run">RUN</button><button data-k="jump">JUMP</button></div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
