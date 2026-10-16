@@ -308,7 +308,7 @@ function buildLevel() {
 }
 
 // ---------------------------------------------------------------- audio (synth, original)
-let AC = null, muted = false, bgmOn = false, bgmT = 0, bgmStep = 0;
+let AC = null, muted = false;
 function audio() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } return AC; }
 function tone(f, d, type = 'square', v = 0.08, slide = 0, delay = 0) {
   const a = AC; if (!a || muted) return;
@@ -333,18 +333,6 @@ const SFX = {
   clear: () => [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, 0.16, 'square', 0.07, 0, i * 0.12)),
   tick: () => tone(1760, 0.03, 'square', 0.03),
 };
-// original looping chiptune (C mixolydian-ish), 8th notes
-const BGM = [60,0,64,67, 72,0,70,67, 65,0,69,72, 70,67,64,0, 60,0,64,67, 72,74,72,67, 65,64,62,64, 60,0,0,0];
-const BASS = [36,36,43,43, 41,41,43,43];
-function bgmTick() {
-  if (!bgmOn || !AC || muted) return;
-  if (++bgmT % 9) return;
-  const n = BGM[bgmStep % BGM.length], b = BASS[(bgmStep >> 2) % BASS.length];
-  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
-  if (n) tone(hz(n), 0.12, 'square', 0.025);
-  if (bgmStep % 2 === 0) tone(hz(b), 0.14, 'triangle', 0.05);
-  bgmStep++;
-}
 
 // ---------------------------------------------------------------- input
 const keys = { left: false, right: false, jump: false, run: false, start: false };
@@ -356,7 +344,7 @@ const KEYMAP = {
 };
 addEventListener('keydown', e => {
   audio();
-  if (e.code === 'KeyM') { muted = !muted; return; }
+  if (e.code === 'KeyM') { muted = !muted; Music.setMuted(muted); return; }
   const k = KEYMAP[e.code]; if (k) { keys[k] = true; if (k === 'jump') keys.start = true; e.preventDefault(); }
 });
 addEventListener('keyup', e => {
@@ -400,7 +388,7 @@ function resetLevel() {
   G.time = 300; G.timeF = 0; G.charge = 0;
 }
 function newGame() { G.score = 0; G.cells = 0; G.lives = 3; G.checkpoint = false; G.done = false; G.deaths = 0; G.maxX = 0; startIntro(); }
-function startIntro() { resetLevel(); G.state = 'intro'; G.stateT = 0; bgmOn = false; }
+function startIntro() { resetLevel(); G.state = 'intro'; G.stateT = 0; Music.stop(); }
 
 const solidAt = (px, py) => {
   const c = Math.floor(px / TS), r = Math.floor(py / TS);
@@ -467,7 +455,7 @@ function hurt() {
   die();
 }
 function die() {
-  G.state = 'dying'; G.stateT = 0; P.vy = -6; P.vx = 0; bgmOn = false; SFX.die(); G.deaths++;
+  G.state = 'dying'; G.stateT = 0; P.vy = -6; P.vx = 0; Music.stop(); SFX.die(); G.deaths++;
 }
 
 // ---------------------------------------------------------------- autopilot (for demo/video)
@@ -611,12 +599,12 @@ function updatePlay() {
   for (const c of cellsList) if (c.alive && overlap(P, c)) { c.alive = false; addCell(c.x, c.y - 6); }
 
   // timer
-  if (++G.timeF % 24 === 0) { G.time--; if (G.time <= 0) die(); }
+  if (++G.timeF % 24 === 0) { G.time--; if (G.time === 100) { Music.hurry(); pops.push({ x: P.x, y: P.y - 16, txt: 'HURRY!', t: 0 }); } if (G.time <= 0) die(); }
   // pit death
   if (P.y > H + 16) die();
   // goal
   if (P.x + P.w >= GOAL_X - 2 && G.state === 'play') {
-    G.state = 'clear'; G.stateT = 0; P.vx = 0; bgmOn = false; SFX.clear();
+    G.state = 'clear'; G.stateT = 0; P.vx = 0; Music.stop(); SFX.clear();
   }
 }
 
@@ -641,7 +629,7 @@ function update() {
   if (AUTOPLAY && G.state === 'play') bot();
   const startPressed = keys.start && !prevStart;
   if (G.state === 'title') { if (startPressed || AUTOPLAY) newGame(); }
-  else if (G.state === 'intro') { if (++G.stateT > (AUTOPLAY ? 70 : 110)) { G.state = 'play'; bgmOn = true; } }
+  else if (G.state === 'intro') { if (++G.stateT > (AUTOPLAY ? 70 : 110)) { G.state = 'play'; if (audio()) Music.start(AC); } }
   else if (G.state === 'play') updatePlay();
   else if (G.state === 'dying') {
     G.stateT++;
@@ -660,7 +648,6 @@ function update() {
   for (const p of pops) { p.t++; p.y -= 0.6; }
   pops = pops.filter(p => p.t < 50);
   for (const k in bumps) if (--bumps[k] <= 0) delete bumps[k];
-  bgmTick();
 }
 
 // ---------------------------------------------------------------- render
@@ -812,7 +799,7 @@ function render() {
     ctext('CHARGE UP. ROLL. REACH THE STATION.', 86, '#9ff8ff');
     ctx.drawImage(CAR[(G.frame >> 3) % 2], 184, 104);
     if ((G.frame >> 5) % 2) ctext('PRESS ENTER OR TAP', 132, '#ffd31a');
-    ctext('ARROWS MOVE  Z JUMP  ZZ ROLL  X RUN', 152, '#ffffff');
+    ctext('ARROWS MOVE  Z JUMP  ZZ ROLL  X RUN  M MUTE', 152, '#ffffff');
     ctext('FAN GAME - NOT AFFILIATED WITH TESLA OR NINTENDO', 206, '#cfe6ff');
   }
   if (G.state === 'clear') {
