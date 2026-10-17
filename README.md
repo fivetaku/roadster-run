@@ -4,7 +4,7 @@
 
 Play: https://roadster.tesduo.com
 
-- Arrows / A·D move, Z / Space jump (press again in the air for a barrel roll), X run, M mute
+- Arrows / A·D move, Z / Space jump (press again in the air for a barrel roll), X walk (running is the default), M mute
 - `?level=2-3` starts at a course, `?autoplay=1` runs the demo bot
 
 All art and sound are original and generated in code. Fan project — not affiliated with Tesla or Nintendo.

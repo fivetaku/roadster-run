@@ -1016,7 +1016,9 @@ function bossHit(en, stomp) {
 
 function updatePlay() {
   const jumpPressed = (keys.jump && !prevJump) || (!AUTOPLAY && tapped.jump);
-  const max = keys.run ? 3.0 : 1.8, acc = keys.run ? 0.13 : 0.1;
+  // running is the default; holding WALK (X / Shift / touch button) slows down for precise moves. The bot drives keys.run directly.
+  const running = AUTOPLAY ? keys.run : !keys.run;
+  const max = running ? 3.0 : 1.8, acc = running ? 0.13 : 0.1;
   if (keys.right && !keys.left) { P.vx = Math.min(max, P.vx + acc); P.face = 1; }
   else if (keys.left && !keys.right) { P.vx = Math.max(-max, P.vx - acc); P.face = -1; }
   else { P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), 0.1); }
@@ -1408,7 +1410,7 @@ function render() {
     ctext('CHARGE UP. ROLL. REACH THE STATION.', 86, '#9ff8ff');
     ctx.drawImage(CAR[(G.frame >> 3) % 2], 184, 104);
     if ((G.frame >> 5) % 2) ctext('PRESS ENTER OR TAP', 132, '#ffd31a');
-    ctext('ARROWS MOVE  Z JUMP  ZZ ROLL  X RUN  M MUTE', 152, '#ffffff');
+    ctext('ARROWS MOVE  Z JUMP  ZZ ROLL  X WALK  M MUTE', 152, '#ffffff');
     ctext('FAN GAME - NOT AFFILIATED WITH TESLA OR NINTENDO', 206, '#cfe6ff');
   }
   if (G.state === 'clear') {
