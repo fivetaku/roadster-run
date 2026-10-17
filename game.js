@@ -494,8 +494,8 @@ const LEVELS = [
     L.cellRow(95, 100, 9); L.e('drone', 100, 7);
     L.up(104, 3, 'S'); L.fill(107, 113, 9, 11, 'S');
     L.molten(114, 138); L.bridge(114, 138, 9);
-    L.e('boss', 132, 9, { min: 122, max: 136, fire: 150, spd: 0.5 });
-    L.fill(139, 145, 9, 13, 'S'); L.switchAt(140);
+    L.e('boss', 132, 9, { min: 120, max: 135, fire: 140, spd: 0.6, hp: 3 });
+    L.fill(139, 145, 9, 13, 'S'); L.gate(139, 2, 8); L.switchAt(141);
   } },
   { id: '2-1', name: 'SUNSET HIGHWAY', theme: 'dusk', cols: 230, check: 110, goal: 'charger', build(L) {
     L.put(8, 8, 'B?B'); L.e('cone', 16, 11); L.e('cone', 19, 11);
@@ -568,19 +568,19 @@ const LEVELS = [
     L.bar(100, 9, 4, -0.06); L.e('drone', 104, 8);
     L.up(108, 3, 'S'); L.fill(111, 117, 9, 11, 'S');
     L.molten(118, 144); L.bridge(118, 144, 9);
-    L.e('boss', 138, 9, { min: 128, max: 142, fire: 110, spd: 0.7 });
-    L.fill(145, 151, 9, 13, 'S'); L.switchAt(146);
+    L.e('boss', 138, 9, { min: 124, max: 141, fire: 110, spd: 0.75, hp: 5 });
+    L.fill(145, 151, 9, 13, 'S'); L.gate(145, 2, 8); L.switchAt(147);
   } },
 ];
 const levelIndex = id => Math.max(0, LEVELS.findIndex(l => l.id === id));
 
-const SOLID = new Set(['G', 'D', 'B', '?', 'L', 'R', 'U', 'S', 'T', 'Z']);
-let COLS = 220, grid, entityDefs, decos, liftDefs, barDefs, GOAL_X, SWITCH_X, CHECK_X, LV, TH, bridgeSpan;
+const SOLID = new Set(['G', 'D', 'B', '?', 'L', 'R', 'U', 'S', 'T', 'Z', 'X']);
+let ARENA_CAM = Infinity, COLS = 220, grid, entityDefs, decos, liftDefs, barDefs, GOAL_X, SWITCH_X, CHECK_X, LV, TH, bridgeSpan;
 function buildLevel() {
   LV = LEVELS[G.level]; TH = { ...THEMES[LV.theme], floor: LV.floor || THEMES[LV.theme].floor };
   COLS = LV.cols;
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill('.'));
-  entityDefs = []; decos = []; liftDefs = []; barDefs = []; GOAL_X = SWITCH_X = Infinity; bridgeSpan = null;
+  entityDefs = []; decos = []; liftDefs = []; barDefs = []; GOAL_X = SWITCH_X = ARENA_CAM = Infinity; bridgeSpan = null;
   CHECK_X = LV.check * TS;
   const L = {
     pit: (a, b) => { for (let c = a; c <= b; c++) { grid[12][c] = '.'; grid[13][c] = '.'; } },
@@ -601,40 +601,66 @@ function buildLevel() {
     deco: (...cs) => cs.forEach(c => decos.push(c)),
     goal: c => { GOAL_X = c * TS; },
     switchAt: c => { SWITCH_X = c * TS; },
+    gate: (c, r0, r1) => { for (let r = r0; r <= r1; r++) grid[r][c] = 'X'; ARENA_CAM = (c + 1) * TS - W; }, // energy gate: opens when the boss falls
   };
   for (let c = 0; c < COLS; c++) { grid[12][c] = 'G'; grid[13][c] = 'D'; }
   LV.build(L);
 }
 
 // ---------------------------------------------------------------- audio (synth, original)
-let AC = null, muted = false;
-function audio() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (AC && AC.state === 'suspended') AC.resume(); return AC; }
+let AC = null, muted = false, sfxBus = null, noiseBuf = null;
+function audio() {
+  if (!AC) {
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      // SFX get their own bus, mixed well above the music so jumps and hits cut through
+      sfxBus = AC.createGain(); sfxBus.gain.value = 1.0; sfxBus.connect(AC.destination);
+      const n = AC.sampleRate * 0.6; noiseBuf = AC.createBuffer(1, n, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) {}
+  }
+  if (AC && AC.state === 'suspended') AC.resume();
+  return AC;
+}
 function tone(f, d, type = 'square', v = 0.08, slide = 0, delay = 0) {
   const a = AC; if (!a || muted) return;
   const t = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
   o.type = type; o.frequency.setValueAtTime(f, t);
   if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), t + d);
-  g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0008, t + d);
-  o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + 0.02);
+  g.gain.setValueAtTime(v * 2.6, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+  o.connect(g).connect(sfxBus || a.destination); o.start(t); o.stop(t + d + 0.02);
+}
+// filtered noise burst: whooshes, crunches, explosions
+function noise(d, v, f0, f1, type = 'bandpass', delay = 0) {
+  const a = AC; if (!a || muted || !noiseBuf) return;
+  const t = a.currentTime + delay, s = a.createBufferSource(), fl = a.createBiquadFilter(), g = a.createGain();
+  s.buffer = noiseBuf; fl.type = type; fl.Q.value = 1.2;
+  fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + d);
+  g.gain.setValueAtTime(v * 2.6, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+  s.connect(fl).connect(g).connect(sfxBus || a.destination); s.start(t); s.stop(t + d + 0.02);
 }
 const SFX = {
-  jump: () => tone(330, 0.16, 'square', 0.07, 760),
-  roll: () => { tone(520, 0.1, 'square', 0.06, 1200); tone(900, 0.12, 'triangle', 0.05, 1500, 0.06); },
-  cell: () => { tone(988, 0.06, 'square', 0.06); tone(1319, 0.18, 'square', 0.06, 0, 0.06); },
-  bump: () => tone(140, 0.08, 'square', 0.08, 90),
-  brk: () => tone(200, 0.2, 'sawtooth', 0.07, 60),
-  sprout: () => [392, 523, 659, 784].forEach((f, i) => tone(f, 0.08, 'square', 0.05, 0, i * 0.05)),
-  power: () => [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.09, 'square', 0.06, 0, i * 0.06)),
-  stomp: () => tone(600, 0.12, 'square', 0.07, 150),
-  hurt: () => tone(400, 0.4, 'square', 0.07, 80),
+  jump: () => { tone(260, 0.18, 'square', 0.08, 900); tone(520, 0.12, 'triangle', 0.04, 1400, 0.02); },
+  roll: () => { noise(0.35, 0.09, 600, 4000); [660, 880, 1175, 1568].forEach((f, i) => tone(f, 0.07, 'square', 0.05, 0, i * 0.05)); },
+  cell: () => { tone(988, 0.06, 'square', 0.06); tone(1319, 0.2, 'square', 0.06, 0, 0.06); },
+  bump: () => { tone(160, 0.09, 'square', 0.08, 70); noise(0.06, 0.05, 800, 300, 'lowpass'); },
+  brk: () => { noise(0.25, 0.12, 2500, 200, 'lowpass'); tone(180, 0.15, 'sawtooth', 0.05, 50); },
+  sprout: () => [392, 523, 659, 784, 1047].forEach((f, i) => tone(f, 0.08, 'square', 0.05, 0, i * 0.05)),
+  power: () => { noise(0.4, 0.05, 2000, 8000, 'highpass'); [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, 0.09, 'square', 0.06, 0, i * 0.06)); },
+  stomp: () => { tone(700, 0.1, 'square', 0.08, 180); noise(0.08, 0.06, 1200, 300, 'lowpass'); },
+  kick: () => tone(500, 0.08, 'square', 0.06, 900),
+  hurt: () => { tone(500, 0.35, 'sawtooth', 0.06, 90); noise(0.2, 0.06, 3000, 400); },
   die: () => [494, 466, 440, 349, 262].forEach((f, i) => tone(f, 0.16, 'square', 0.07, 0, i * 0.14)),
-  thrust: () => tone(90 + Math.random() * 60, 0.05, 'sawtooth', 0.025),
+  thrust: () => noise(0.07, 0.05, 400 + Math.random() * 300, 150, 'lowpass'),
   clear: () => [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, 0.16, 'square', 0.07, 0, i * 0.12)),
-  tick: () => tone(1760, 0.03, 'square', 0.03),
-  zap: () => tone(1200, 0.12, 'sawtooth', 0.04, 300),
-  crash: () => tone(120, 0.5, 'sawtooth', 0.08, 40),
+  tick: () => tone(1760, 0.03, 'square', 0.025),
+  zap: () => { tone(1400, 0.14, 'sawtooth', 0.04, 250); noise(0.1, 0.03, 5000, 1500, 'highpass'); },
+  crash: () => { noise(0.9, 0.16, 1500, 60, 'lowpass'); tone(110, 0.6, 'sawtooth', 0.06, 35); },
   button: () => [784, 1047].forEach((f, i) => tone(f, 0.08, 'square', 0.07, 0, i * 0.07)),
   ending: () => [523, 659, 784, 1047, 880, 1047, 1175, 1319, 1568].forEach((f, i) => tone(f, 0.2, 'square', 0.07, 0, i * 0.15)),
+  land: () => noise(0.06, 0.05, 500, 120, 'lowpass'),
+  bossHit: () => { tone(220, 0.25, 'square', 0.09, 60); noise(0.3, 0.1, 2500, 200, 'lowpass'); tone(880, 0.1, 'square', 0.05, 1760, 0.05); },
+  blob: () => noise(0.18, 0.05, 300, 900, 'bandpass'),
 };
 
 // ---------------------------------------------------------------- input
@@ -785,8 +811,42 @@ function threats() {
   const list = enemies.filter(en => en.alive && !(en.t === 'blob' && en.hidden));
   return list;
 }
+function botBoss(boss) {
+  // chase the boss and land on its head; hop over incoming shots
+  const dx = (boss.x + boss.w / 2) - (P.x + P.w / 2);
+  keys.run = true; keys.left = dx < -6; keys.right = dx > 6;
+  if (P.onGround) {
+    const shot = enemies.some(en => en.t === 'shot' && en.alive && Math.abs(en.x - P.x) < 70 && Math.sign(P.x - en.x) === Math.sign(en.vx) && en.y + en.h > P.y + 2 && en.y < P.y + P.h);
+    const shotAbove = enemies.some(en => en.t === 'shot' && en.alive && en.x + en.w > P.x - 50 && en.x < P.x + P.w + 50 && en.y < P.y);
+    const ad = Math.abs(dx), cornered = P.x - G.cam < 40 || (G.cam + W) - (P.x + P.w) < 40;
+    const open = boss.hitT === 0 && boss.mode === 'cool';
+    const go = (open && ad < 78 && (ad > 30 || cornered) && !shotAbove) || shot;
+    if (!go && !open) {                                   // wait it out at a safe distance
+      if (ad < 120) { keys.left = dx > 0; keys.right = dx < 0; } else { keys.left = keys.right = false; }
+      if (cornered && ad < 60 && boss.hitT === 0) { keys.jump = !prevJump; P.holdJ = 40; P.botOver = true; return; }
+      keys.jump = false; return;
+    }
+    keys.jump = go && !prevJump; P.holdJ = go ? 30 : 0;
+    if (!go && boss.hitT > 0) {
+      if (cornered && boss.hitT < 30) { keys.jump = !prevJump; P.holdJ = 40; P.botOver = true; }  // vault over to the open side
+      else if (Math.abs(dx) < 90) { keys.left = dx > 0; keys.right = dx < 0; }                    // otherwise keep some distance
+    }
+    return;
+  }
+  if (P.botOver) {
+    keys.left = dx < 0; keys.right = dx > 0;                                    // keep flying across
+    if (P.jumps === 1 && P.vy > -0.5 && !P.botTap) { keys.jump = false; prevJump = false; P.botTap = 2; }
+    if (P.botTap) { P.botTap--; keys.jump = P.botTap === 0; return; }
+    if ((dx > 0 ? -dx : dx) < -50 && P.vy > 0) P.botOver = false;
+    keys.jump = true; return;
+  }
+  if (P.holdJ > 0) { P.holdJ--; keys.jump = true; } else keys.jump = false;
+  if (P.vy > 0 && P.y + P.h > boss.y && Math.abs(dx) > 28) { keys.left = dx > 0; keys.right = dx < 0; } // falling beside it: drift away
+}
 function bot() {
   keys.left = false; keys.right = true; keys.run = true;
+  const boss = enemies.find(e => e.t === 'boss' && e.alive && e.x - G.cam < W - 40);
+  if (boss) { botBoss(boss); return; }
   const front = P.x + P.w;
   const feetRow = Math.floor((P.y + P.h + 2) / TS);
   const bodyRow = Math.floor((P.y + P.h / 2) / TS);
@@ -861,7 +921,7 @@ function spawn(d) {
   if (d.t === 'tire') enemies.push({ t: 'tire', x, y: y + 2, w: 14, h: 14, vx: -1.1, vy: 0, alive: true, anim: 0 });
   if (d.t === 'drone') enemies.push({ t: 'drone', x, y, by: y, w: 16, h: 8, vx: -0.7, vy: 0, alive: true, anim: 0, ph: d.c });
   if (d.t === 'blob') enemies.push({ t: 'blob', x: x + 2, y: 12 * TS + 4, home: 12 * TS + 4, w: 12, h: 12, vx: 0, vy: 0, alive: true, anim: 0, wait: 40 + (d.c * 13) % 70, hidden: true });
-  if (d.t === 'boss') enemies.push({ t: 'boss', x, y: y - 44, w: 46, h: 44, vx: -d.spd, vy: 0, alive: true, anim: 0, min: d.min * TS, max: d.max * TS, fire: d.fire, spd: d.spd, t2: 0 });
+  if (d.t === 'boss') enemies.push({ t: 'boss', x, y: y - 44, w: 46, h: 44, vx: -d.spd, vy: 0, alive: true, anim: 0, min: d.min * TS, max: d.max * TS, fire: d.fire, spd: d.spd, t2: 0, hp: d.hp, maxHp: d.hp, hitT: 0, face: -1, mode: 'move', shots: 0, coolT: 0 });
 }
 function updateLifts() {
   for (const l of lifts) {
@@ -896,24 +956,61 @@ function updateEnemy(en) {
     else { en.vy += 0.3; en.y += en.vy; if (en.y >= en.home && en.vy > 0) { en.y = en.home; en.vy = 0; en.hidden = true; en.wait = 90 + (en.anim % 50); } }
   } else if (en.t === 'shot') {
     en.x += en.vx; en.y += Math.sin(en.anim / 6) * 0.6;
-    if (en.x < G.cam - 20) { en.alive = false; en.gone = true; }
+    if (en.x < G.cam - 20 || en.x > G.cam + W + 20) { en.alive = false; en.gone = true; }
   } else if (en.t === 'boss') {
-    en.t2++;
-    if (en.t2 % 80 === 0) en.vx = (((en.t2 / 80) | 0) % 3 === 0 ? 1 : -1) * en.spd;
-    if (en.x < en.min) en.vx = Math.abs(en.vx); if (en.x > en.max) en.vx = -Math.abs(en.vx);
-    if (en.onGround && en.t2 % 130 === 65) en.vy = -5;
+    // pattern: patrol + fire 3 shots, then stop and overheat (COOLING) — the window to stomp it
+    en.t2++; if (en.hitT > 0) en.hitT--;
+    const rage = 1 + (en.maxHp - en.hp) * 0.3, spd = en.spd * rage, fire = Math.max(50, Math.round(en.fire / rage));
+    en.face = P.x + P.w / 2 < en.x + en.w / 2 ? -1 : 1;
     en.vy = Math.min(7, en.vy + 0.4);
-    moveBody(en);
-    if (en.t2 % en.fire === 0 && en.x < G.cam + W) {
-      enemies.push({ t: 'shot', x: en.x - 12, y: en.y + ((en.t2 / en.fire) % 2 ? 10 : 30), w: 10, h: 6, vx: -2.3, vy: 0, alive: true, anim: 0 });
-      SFX.zap();
+    if (en.mode === 'cool') {
+      en.vx = 0;
+      if (G.frame % 6 === 0) parts.push({ k: 'steam', x: en.x + 10 + Math.random() * 26, y: en.y, vx: 0, vy: -0.8, t: 0 });
+      if (--en.coolT <= 0) { en.mode = 'move'; en.shots = 0; en.t2 = 1; }
+    } else {
+      if (en.t2 % 70 === 0) en.vx = (((en.t2 / 70) | 0) % 3 === 0 ? 1 : -1) * spd;
+      if (en.vx === 0) en.vx = -spd;
+      if (en.x < en.min) en.vx = Math.abs(en.vx); if (en.x > en.max) en.vx = -Math.abs(en.vx);
+      if (en.onGround && en.t2 % Math.round(130 / rage) === 60) en.vy = -5.5;
+      if (en.t2 % fire === 0 && en.x < G.cam + W && en.hitT === 0) {
+        const high = en.shots % 2;
+        enemies.push({ t: 'shot', x: en.face < 0 ? en.x - 12 : en.x + en.w, y: en.y + (high ? 10 : 30), w: 10, h: 6, vx: 2.3 * en.face, vy: 0, alive: true, anim: 0 });
+        SFX.zap();
+        if (++en.shots >= 3) { en.mode = 'cool'; en.coolT = Math.round(110 / Math.sqrt(rage)); }
+      }
     }
+    moveBody(en);
+  }
+  if (G.state === 'play' && en.alive && en.t === 'boss' && overlap(P, en)) {
+    if (en.hitT > 0) return;
+    const stomp = (P.vy > 0.5 || P.lastVy > 0.5) && P.y + P.h - en.y < 18;
+    if (stomp || P.roll > 0) bossHit(en, stomp); else hurt('boss');
+    return;
   }
   if (G.state === 'play' && en.alive && !(en.t === 'blob' && en.hidden) && overlap(P, en)) {
     if (STOMPABLE.has(en.t) && (P.vy > 0.5 || P.lastVy > 0.5) && P.y + P.h - en.y < (P.lastVy > 3 ? 17 : 14)) {
       en.alive = false; en.squash = en.t === 'cone'; if (!en.squash) { en.flip = true; en.vy = -2; en.vx = 0; }
       P.vy = keys.jump ? -6.5 : -4; P.jumps = 1; addScore(100, en.x, en.y - 8); SFX.stomp();
     } else hurt(en.t);
+  }
+}
+
+function bossHit(en, stomp) {
+  en.hp--; en.hitT = 70; en.mode = 'move'; en.shots = 0; en.t2 = 1; SFX.bossHit();
+  for (let i = 0; i < 14; i++) parts.push({ k: 'spark', x: en.x + en.w / 2, y: en.y + 10, vx: Math.cos(i * 0.45) * 2.6, vy: Math.sin(i * 0.45) * 2.6, t: 0 });
+  P.vy = -7; P.jumps = 1; P.roll = 0;
+  if (!stomp) P.vx = (P.x < en.x ? -1 : 1) * 3;
+  pops.push({ x: en.x, y: en.y - 10, txt: en.hp > 0 ? 'HIT! ' + en.hp + ' LEFT' : 'KO!', t: 0 });
+  addScore(1000);
+  if (en.hp <= 0) {
+    en.alive = false; en.falling = true; en.vy = -4; en.vx = 0; addScore(5000, en.x, en.y);
+    SFX.crash();
+    for (let i = 0; i < 30; i++) parts.push({ k: 'debris', x: en.x + Math.random() * en.w, y: en.y + Math.random() * en.h, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 6, t: 0 });
+    // the energy gate drops
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c] === 'X') {
+      grid[r][c] = '.'; parts.push({ k: 'spark', x: c * TS + 8, y: r * TS + 8, vx: 0, vy: -1, t: 0 });
+    }
+    pops.push({ x: en.x + 30, y: en.y - 24, txt: 'GATE OPEN', t: 0 });
   }
 }
 
@@ -966,6 +1063,8 @@ function updatePlay() {
 
   const target = P.x - 150;
   G.cam = Math.max(G.cam, Math.min(target, COLS * TS - W));
+  // boss arena: the screen stops with the gate on its right edge while the boss is alive
+  if (enemies.some(e => e.t === 'boss' && e.alive)) G.cam = Math.min(G.cam, ARENA_CAM);
 
   for (let i = pending.length - 1; i >= 0; i--) {
     const d = pending[i];
@@ -1104,6 +1203,14 @@ function drawTiles(cam) {
     if (ch === 'U') img = USED;
     else if (ch === '?' || ch === 'L' || ch === 'R') img = QBLOCK[[0, 1, 0, 2][(G.frame >> 4) % 4]];
     else if (ch === 'M') img = MOLTEN[(G.frame >> 4) % 2];
+    else if (ch === 'X') {
+      const xx = Math.round(x);
+      ctx.fillStyle = 'rgba(53,212,255,0.25)'; ctx.fillRect(xx + 2, y, 12, 16);
+      ctx.fillStyle = (G.frame >> 2) % 2 ? '#9ff8ff' : '#35d4ff';
+      for (let k = 0; k < 3; k++) ctx.fillRect(xx + 3 + k * 4, y + ((G.frame + k * 5 + r * 3) % 16), 2, 6);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(xx + 7, y, 2, 16);
+      continue;
+    }
     if (img) ctx.drawImage(img, Math.round(x), Math.round(y));
   }
 }
@@ -1162,7 +1269,8 @@ function drawLift(l, cam) {
   ctx.fillStyle = '#14121a'; for (let i = 6; i < l.w - 4; i += 12) ctx.fillRect(x + i, y + 3, 2, 2);
 }
 function drawBoss(en, cam) {
-  ctx.save(); ctx.translate(Math.round(en.x - cam), Math.round(en.y)); ctx.scale(1.5, 1.5);
+  if (en.hitT > 0 && (en.hitT >> 2) % 2) return;
+  ctx.save(); ctx.translate(Math.round(en.x - cam) + (en.face > 0 ? en.w : 0), Math.round(en.y)); ctx.scale(1.5 * (en.face > 0 ? -1 : 1), 1.5);
   const x = 0, y = 0, blink = (en.anim >> 3) % 2;
   ctx.fillStyle = '#14121a'; ctx.fillRect(x + 1, y + 23, 31, 7);
   for (const wx of [5, 16, 27]) disc(ctx, x + wx, y + 26, 3, '#7a828e');
@@ -1178,7 +1286,9 @@ function drawBoss(en, cam) {
   ctx.fillStyle = '#14121a'; ctx.fillRect(x - 6, y + 13, 12, 6);
   ctx.fillStyle = '#3a3d44'; ctx.fillRect(x - 5, y + 14, 10, 4);
   ctx.fillStyle = '#35d4ff'; ctx.fillRect(x - 6, y + 15, 2, 2);
+  if (en.mode === 'cool') { ctx.fillStyle = (en.anim >> 2) % 2 ? '#ffd31a' : '#ff8c1a'; ctx.fillRect(x + 9, y - 1, 15, 2); }
   ctx.restore();
+  if (en.mode === 'cool') text('COOLING', Math.round(en.x - cam) + 2, Math.round(en.y) - 22, '#ffd31a');
 }
 function drawEnemies(cam) {
   for (const en of enemies) {
@@ -1214,6 +1324,14 @@ function drawHUD() {
   ctx.drawImage(BOLT, 134, 3, 10, 10);
   text('x' + String(G.cells).padStart(2, '0'), 146, 6);
   text('WORLD ' + LV.id, 232, 6); text('TIME ' + String(Math.max(0, G.time)).padStart(3, '0'), 330, 6);
+  const boss = enemies && enemies.find(e => e.t === 'boss' && e.alive && e.x - G.cam < W + 20);
+  if (boss && G.state === 'play') {
+    text('GIGA-BOT', 140, 20, '#ff6a3d');
+    for (let i = 0; i < boss.maxHp; i++) {
+      ctx.fillStyle = '#14121a'; ctx.fillRect(194 + i * 12, 19, 10, 9);
+      ctx.fillStyle = i < boss.hp ? '#e5432c' : '#3a3d44'; ctx.fillRect(195 + i * 12, 20, 8, 7);
+    }
+  }
   if (P && P.rocket) {
     ctx.fillStyle = '#14121a'; ctx.fillRect(170, 7, 34, 6);
     ctx.fillStyle = '#ff8c1a'; ctx.fillRect(171, 8, Math.round(32 * P.fuel / 80), 4);
@@ -1278,6 +1396,7 @@ function render() {
     if (p.k === 'debris') ctx.drawImage(TH.tiles.B || USED, 0, 0, 8, 8, x, y, 8, 8);
     else if (p.k === 'popcell') ctx.drawImage(CELL[0], x, y);
     else if (p.k === 'flame') { ctx.fillStyle = p.t < 5 ? '#ffd31a' : '#ff8c1a'; ctx.fillRect(x, y, 3, 3); }
+    else if (p.k === 'steam') { ctx.fillStyle = 'rgba(220,220,230,' + (0.6 - p.t / 50) + ')'; ctx.fillRect(x, y, 4, 4); }
     else { ctx.fillStyle = p.t % 4 < 2 ? '#9ff8ff' : '#ffffff'; ctx.fillRect(x, y, 2, 2); }
   }
   for (const p of pops) text(p.txt, Math.round(p.x - cam), Math.round(p.y), p.txt.includes('CHARGE') || p.txt.includes('THRUST') ? '#9ff8ff' : p.txt === 'ROLL!' ? '#ffd31a' : '#ffffff');
@@ -1349,6 +1468,8 @@ window.RR = {
   G, LEVELS, get P() { return P; }, get enemies() { return enemies; }, get LV() { return LV; },
   stepN(n) { for (let i = 0; i < n; i++) { update(); if (G.done) break; } render(); return { state: G.state, level: LV.id, x: Math.round(P.x), score: G.score, deaths: G.deaths, lives: G.lives }; },
   renderFullMap,
+  // capture everything the game plays (music + SFX) into a MediaStream, for recording demo videos
+  tapAudio() { audio(); const dest = AC.createMediaStreamDestination(); sfxBus.connect(dest); Music.tap(dest); return dest.stream; },
   loadLevel(id) { G.level = levelIndex(id); G.checkpoint = false; resetLevel(); },
   icon(size) {
     const c = mk(size, size), x = c.getContext('2d'); x.imageSmoothingEnabled = false;

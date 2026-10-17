@@ -87,8 +87,8 @@ const Music = (() => {
   }
 
   // ---- synth
-  let ac = null, out = null, noise = null, waves = {};
-  let song = SONGS.highway, playing = false, nextT = 0, step = 0, timer = 0, tempo = 1, gain = 0.9;
+  let ac = null, out = null, noise = null, waves = {}, taps = [];
+  let song = SONGS.highway, playing = false, nextT = 0, step = 0, timer = 0, tempo = 1, gain = 0.55;
   function pulse(duty) {
     if (waves[duty]) return waves[duty];
     const n = 64, re = new Float32Array(n), im = new Float32Array(n);
@@ -99,6 +99,7 @@ const Music = (() => {
     if (ac === ctx) return;
     ac = ctx; waves = {};
     out = ac.createGain(); out.gain.value = gain; out.connect(ac.destination);
+    taps.forEach(n => n.context === ac && out.connect(n));
     const len = ac.sampleRate * 0.5, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     noise = buf;
@@ -161,9 +162,10 @@ const Music = (() => {
       if (out) { out.gain.cancelScheduledValues(ac.currentTime); out.gain.setValueAtTime(out.gain.value, ac.currentTime); out.gain.linearRampToValueAtTime(0, ac.currentTime + 0.08); }
     },
     hurry() { tempo = 1.3; },
+    tap(node) { taps.push(node); if (out && node.context === ac) out.connect(node); }, // extra output (recording)
     get playing() { return playing; },
     get song() { return Object.keys(SONGS).find(k => SONGS[k] === song); },
-    setMuted(m) { gain = m ? 0 : 0.9; if (out) out.gain.setValueAtTime(gain, ac.currentTime); },
+    setMuted(m) { gain = m ? 0 : 0.55; if (out) out.gain.setValueAtTime(gain, ac.currentTime); },
     // offline render of one loop, for checks and exporting preview files
     renderTo(ctx, id) {
       init(ctx); const S = SONGS[id], sx = stepDur(S);
